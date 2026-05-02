@@ -1421,29 +1421,58 @@ async function syncFromSupabase(){
       sb.from('foto').select('*'),
       sb.from('tessuti').select('*')
     ]);
-    if(cli.data) save('cli', cli.data.map(r=>({
-      id:r.id, nome:r.nome, tel:r.tel, email:r.email, citta:r.citta,
-      nascita:r.nascita, note:r.nota, foto:r.foto,
-      misure:r.misure||{}, stile:r.stile||{}, createdAt:r.created_at
-    })));
-    if(ord.data) save('ord', ord.data.map(r=>({
-      id:r.id, cliId:r.cliente_id, data:r.data, nome:r.nome,
-      stato:r.stato, tessuto:r.tessuto, note:r.nota
-    })));
-    if(fotoR.data) save('foto', fotoR.data.map(r=>({
-      id:r.id, cliId:r.cliente_id, cat:r.cat, desc:r.descrizione, img:r.img
-    })));
-    if(tess.data) save('tess', tess.data.map(r=>({
-      id:r.id, cliId:r.cliente_id, nome:r.nome, colore:r.colore,
-      comp:r.comp, forn:r.fornitore, usato:r.usato_per, note:r.nota, foto:r.foto
-    })));
+    console.log('☁️ Supabase sync:', cli.data?.length,'clienti',ord.data?.length,'ordini');
+    if(cli.error) console.error('clienti error:', cli.error);
+    if(ord.error) console.error('ordini error:', ord.error);
+
+    // Solo sovrascrivi se il cloud ha dati OPPURE se il locale è vuoto
+    const localCli = load('cli');
+    if(cli.data && (cli.data.length > 0 || localCli.length === 0)){
+      save('cli', cli.data.map(r=>({
+        id:r.id, nome:r.nome, tel:r.tel, email:r.email, citta:r.citta,
+        nascita:r.nascita, note:r.nota, foto:r.foto,
+        misure:r.misure||{}, stile:r.stile||{}, createdAt:r.created_at
+      })));
+    }
+    const localOrd = load('ord');
+    if(ord.data && (ord.data.length > 0 || localOrd.length === 0)){
+      save('ord', ord.data.map(r=>({
+        id:r.id, cliId:r.cliente_id, data:r.data, nome:r.nome,
+        stato:r.stato, tessuto:r.tessuto, note:r.nota
+      })));
+    }
+    const localFoto = load('foto');
+    if(fotoR.data && (fotoR.data.length > 0 || localFoto.length === 0)){
+      save('foto', fotoR.data.map(r=>({
+        id:r.id, cliId:r.cliente_id, cat:r.cat, desc:r.descrizione, img:r.img
+      })));
+    }
+    const localTess = load('tess');
+    if(tess.data && (tess.data.length > 0 || localTess.length === 0)){
+      save('tess', tess.data.map(r=>({
+        id:r.id, cliId:r.cliente_id, nome:r.nome, colore:r.colore,
+        comp:r.comp, forn:r.fornitore, usato:r.usato_per, note:r.nota, foto:r.foto
+      })));
+    }
+
+    // Se il cloud è vuoto ma il locale ha dati, carica il locale su Supabase
+    if(cli.data && cli.data.length === 0 && localCli.length > 0){
+      console.log('📤 Carico dati locali su Supabase...');
+      for(const c of localCli) await sbSaveCliente(c);
+      for(const o of load('ord')) await sbSaveOrdine(o);
+      for(const f of load('foto')) await sbSaveFoto(f);
+      for(const t of load('tess')) await sbSaveTessuto(t);
+      console.log('✅ Migrazione completata');
+    }
   } catch(e){ console.warn('Sync error:', e); }
 }
 
 async function sbSaveCliente(c){
   const row={id:c.id,nome:c.nome,tel:c.tel,email:c.email,citta:c.citta,
     nascita:c.nascita||null,nota:c.note,foto:c.foto,misure:c.misure,stile:c.stile};
-  await sb.from('clienti').upsert(row);
+  const {error}=await sb.from('clienti').upsert(row);
+  if(error) console.error('❌ sbSaveCliente error:', error);
+  else console.log('✅ Cliente salvato su Supabase:', c.nome);
 }
 async function sbDeleteCliente(id){
   await sb.from('clienti').delete().eq('id',id);
