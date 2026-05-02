@@ -779,15 +779,44 @@ body{font-family:'Jost',sans-serif;background:var(--paper);color:var(--ink);min-
 // ══ SUPABASE ══
 const SB_URL='https://bkwgjcmewoyjszsmtgwk.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJrd2dqY21ld295anN6c210Z3drIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MDE3MjcsImV4cCI6MjA5MzI3NzcyN30.A1qW-q_Eu_snk7RZIymp4o-pVky3_fi3T81WYRP0EsQ';
-const sb = supabase.createClient(SB_URL, SB_KEY, {
-  auth: {
-    persistSession: true,
-    storageKey: 'fv-auth',
-    storage: window.localStorage,
-    autoRefreshToken: true,
-    detectSessionInUrl: false
+let sb=null;
+let SB_TOKEN=null;
+
+function initSb(){
+  if(!sb) sb=supabase.createClient(SB_URL,SB_KEY,{
+    auth:{persistSession:true,storageKey:'fv-auth',storage:window.localStorage,autoRefreshToken:true}
+  });
+  return sb;
+}
+
+// REST API diretta con token
+async function sbRest(method,table,body=null,id=null){
+  const token=SB_TOKEN||SB_KEY;
+  const url=id?`${SB_URL}/rest/v1/${table}?id=eq.${id}`:`${SB_URL}/rest/v1/${table}`;
+  const headers={
+    'Content-Type':'application/json',
+    'apikey':SB_KEY,
+    'Authorization':`Bearer ${token}`,
+    'Prefer':'return=minimal'
+  };
+  if(method==='UPSERT'){
+    headers['Prefer']='resolution=merge-duplicates,return=minimal';
+    const r=await fetch(`${SB_URL}/rest/v1/${table}`,{method:'POST',headers,body:JSON.stringify(body)});
+    if(!r.ok){const t=await r.text();console.error(`❌ ${table} upsert:`,r.status,t);}
+    else console.log(`✅ ${table} salvato`);
+    return r;
   }
-});
+  if(method==='DELETE'){
+    const r=await fetch(url,{method:'DELETE',headers});
+    if(!r.ok) console.error(`❌ ${table} delete:`,r.status);
+    return r;
+  }
+  if(method==='GET'){
+    const r=await fetch(`${SB_URL}/rest/v1/${table}?select=*`,{method:'GET',headers});
+    if(!r.ok){console.error(`❌ ${table} get:`,r.status);return[];}
+    return r.json();
+  }
+}
 
 // ══ STORAGE (localStorage cache + Supabase sync) ══
 const K={cli:'at4_cli',ord:'at4_ord',foto:'at4_foto',tess:'at4_tess'};
@@ -1408,7 +1437,9 @@ async function doLogin(){
   const err=document.getElementById('login-err');
   if(!email||!pwd){err.textContent='Inserisci email e password';return;}
   btn.disabled=true;btn.textContent='Accesso...';err.textContent='';
-  const {error}=await sb.auth.signInWithPassword({email,password:pwd});
+  initSb();
+  const {data,error}=await sb.auth.signInWithPassword({email,password:pwd});
+  if(data?.session) SB_TOKEN=data.session.access_token;
   if(error){
     err.textContent=error.message==='Invalid login credentials'?'Email o password errati':error.message;
     btn.disabled=false;btn.textContent='Accedi';
@@ -1422,19 +1453,18 @@ document.addEventListener('keydown',e=>{
 // ══ SUPABASE SYNC ══
 async function syncFromSupabase(){
   try {
-    const [cli,ord,fotoR,tess]=await Promise.all([
-      sb.from('clienti').select('*'),
-      sb.from('ordini').select('*'),
-      sb.from('foto').select('*'),
-      sb.from('tessuti').select('*')
+    const [cliData,ordData,fotoData,tessData]=await Promise.all([
+      sbRest('GET','clienti'),
+      sbRest('GET','ordini'),
+      sbRest('GET','foto'),
+      sbRest('GET','tessuti')
     ]);
-    console.log('☁️ Supabase sync:', cli.data?.length,'clienti',ord.data?.length,'ordini');
-    if(cli.error) console.error('clienti error:', cli.error);
-    if(ord.error) console.error('ordini error:', ord.error);
+    console.log('☁️ Supabase sync:', cliData?.length,'clienti',ordData?.length,'ordini');
 
     // Solo sovrascrivi se il cloud ha dati OPPURE se il locale è vuoto
     const localCli = load('cli');
-    if(cli.data && (cli.data.length > 0 || localCli.length === 0)){
+    if(cliData && (cliData.length > 0 || localCli.length === 0)){
+      const cli={data:cliData};
       save('cli', cli.data.map(r=>({
         id:r.id, nome:r.nome, tel:r.tel, email:r.email, citta:r.citta,
         nascita:r.nascita, note:r.nota, foto:r.foto,
@@ -1442,28 +1472,28 @@ async function syncFromSupabase(){
       })));
     }
     const localOrd = load('ord');
-    if(ord.data && (ord.data.length > 0 || localOrd.length === 0)){
-      save('ord', ord.data.map(r=>({
+    if(ordData && (ordData.length > 0 || localOrd.length === 0)){
+      save('ord', ordData.map(r=>({
         id:r.id, cliId:r.cliente_id, data:r.data, nome:r.nome,
         stato:r.stato, tessuto:r.tessuto, note:r.nota
       })));
     }
     const localFoto = load('foto');
-    if(fotoR.data && (fotoR.data.length > 0 || localFoto.length === 0)){
-      save('foto', fotoR.data.map(r=>({
+    if(fotoData && (fotoData.length > 0 || localFoto.length === 0)){
+      save('foto', fotoData.map(r=>({
         id:r.id, cliId:r.cliente_id, cat:r.cat, desc:r.descrizione, img:r.img
       })));
     }
     const localTess = load('tess');
-    if(tess.data && (tess.data.length > 0 || localTess.length === 0)){
-      save('tess', tess.data.map(r=>({
+    if(tessData && (tessData.length > 0 || localTess.length === 0)){
+      save('tess', tessData.map(r=>({
         id:r.id, cliId:r.cliente_id, nome:r.nome, colore:r.colore,
         comp:r.comp, forn:r.fornitore, usato:r.usato_per, note:r.nota, foto:r.foto
       })));
     }
 
     // Se il cloud è vuoto ma il locale ha dati, carica il locale su Supabase
-    if(cli.data && cli.data.length === 0 && localCli.length > 0){
+    if(cliData && cliData.length === 0 && localCli.length > 0){
       console.log('📤 Carico dati locali su Supabase...');
       for(const c of localCli) await sbSaveCliente(c);
       for(const o of load('ord')) await sbSaveOrdine(o);
@@ -1474,37 +1504,35 @@ async function syncFromSupabase(){
   } catch(e){ console.warn('Sync error:', e); }
 }
 
-async function sbSaveCliente(c){
-  const row={id:c.id,nome:c.nome,tel:c.tel,email:c.email,citta:c.citta,
-    nascita:c.nascita||null,nota:c.note,foto:c.foto,misure:c.misure,stile:c.stile};
-  const {error}=await sb.from('clienti').upsert(row);
-  if(error) console.error('❌ sbSaveCliente error:', error);
-  else console.log('✅ Cliente salvato su Supabase:', c.nome);
+async function sbSaveCliente(cl){
+  const row={id:cl.id,nome:cl.nome,tel:cl.tel,email:cl.email,citta:cl.citta,
+    nascita:cl.nascita||null,nota:cl.note,foto:cl.foto,misure:cl.misure,stile:cl.stile};
+  await sbRest('UPSERT','clienti',row);
 }
-async function sbDeleteCliente(id){
-  await sb.from('clienti').delete().eq('id',id);
-}
+async function sbDeleteCliente(id){ await sbRest('DELETE','clienti',null,id); }
 async function sbSaveOrdine(o){
   const row={id:o.id,cliente_id:o.cliId,data:o.data,nome:o.nome,
     stato:o.stato,tessuto:o.tessuto,nota:o.note};
-  await sb.from('ordini').upsert(row);
+  await sbRest('UPSERT','ordini',row);
 }
-async function sbDeleteOrdine(id){ await sb.from('ordini').delete().eq('id',id); }
+async function sbDeleteOrdine(id){ await sbRest('DELETE','ordini',null,id); }
 async function sbSaveFoto(f){
   const row={id:f.id,cliente_id:f.cliId,cat:f.cat,descrizione:f.desc,img:f.img};
-  await sb.from('foto').upsert(row);
+  await sbRest('UPSERT','foto',row);
 }
-async function sbDeleteFoto(id){ await sb.from('foto').delete().eq('id',id); }
+async function sbDeleteFoto(id){ await sbRest('DELETE','foto',null,id); }
 async function sbSaveTessuto(t){
   const row={id:t.id,cliente_id:t.cliId,nome:t.nome,colore:t.colore,
     comp:t.comp,fornitore:t.forn,usato_per:t.usato,nota:t.note,foto:t.foto};
-  await sb.from('tessuti').upsert(row);
+  await sbRest('UPSERT','tessuti',row);
 }
-async function sbDeleteTessuto(id){ await sb.from('tessuti').delete().eq('id',id); }
+async function sbDeleteTessuto(id){ await sbRest('DELETE','tessuti',null,id); }
 
 // ══ LOGOUT ══
 async function doLogout(){
+  initSb();
   await sb.auth.signOut();
+  SB_TOKEN=null;
   document.getElementById('login-screen').style.display='flex';
   document.getElementById('login-pwd').value='';
   document.getElementById('login-btn').disabled=false;
@@ -1519,7 +1547,9 @@ document.addEventListener('DOMContentLoaded',async ()=>{
   });
 
   // Check session
+  initSb();
   const {data:{session}}=await sb.auth.getSession();
+  if(session) SB_TOKEN=session.access_token;
   if(session){
     document.getElementById('login-screen').style.display='none';
     await syncFromSupabase();
@@ -1529,7 +1559,9 @@ document.addEventListener('DOMContentLoaded',async ()=>{
   }
 
   // Listen for auth changes
+  initSb();
   sb.auth.onAuthStateChange(async (event,session)=>{
+    if(session) SB_TOKEN=session.access_token;
     if(event==='SIGNED_IN'){
       document.getElementById('login-screen').style.display='none';
       await syncFromSupabase();
