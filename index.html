@@ -802,7 +802,12 @@ async function sbRest(method,table,body=null,id=null){
   if(method==='UPSERT'){
     headers['Prefer']='resolution=merge-duplicates,return=minimal';
     const r=await fetch(`${SB_URL}/rest/v1/${table}`,{method:'POST',headers,body:JSON.stringify(body)});
-    if(!r.ok){const t=await r.text();console.error(`❌ ${table} upsert:`,r.status,t);}
+    if(!r.ok){
+      const t=await r.text();
+      let parsed=t;try{parsed=JSON.parse(t);}catch{}
+      console.error(`❌ ${table} upsert ${r.status}:`,parsed);
+      console.error('Row data:', JSON.stringify(body).substring(0,200));
+    }
     else console.log(`✅ ${table} salvato`);
     return r;
   }
@@ -822,7 +827,9 @@ async function sbRest(method,table,body=null,id=null){
 const K={cli:'at4_cli',ord:'at4_ord',foto:'at4_foto',tess:'at4_tess'};
 const load=k=>{try{return JSON.parse(localStorage.getItem(K[k])||'[]');}catch{return[];}};
 const save=(k,d)=>localStorage.setItem(K[k],JSON.stringify(d));
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+const uid=()=>'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+  const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);
+});
 const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 const fmt=d=>{if(!d)return'-';return new Date(d+'T12:00:00').toLocaleDateString('it-IT',{day:'2-digit',month:'2-digit',year:'numeric'});};
 const isBday=d=>{if(!d)return false;const b=new Date(d),n=new Date();return b.getDate()===n.getDate()&&b.getMonth()===n.getMonth();};
@@ -1505,8 +1512,18 @@ async function syncFromSupabase(){
 }
 
 async function sbSaveCliente(cl){
-  const row={id:cl.id,nome:cl.nome,tel:cl.tel,email:cl.email,citta:cl.citta,
-    nascita:cl.nascita||null,nota:cl.note,foto:cl.foto,misure:cl.misure,stile:cl.stile};
+  const row={
+    id:cl.id,
+    nome:cl.nome||'',
+    tel:cl.tel||null,
+    email:cl.email||null,
+    citta:cl.citta||null,
+    nascita:(cl.nascita&&cl.nascita.trim())?cl.nascita:null,
+    nota:cl.note||null,
+    foto:cl.foto||null,
+    misure:cl.misure||{},
+    stile:cl.stile||{}
+  };
   await sbRest('UPSERT','clienti',row);
 }
 async function sbDeleteCliente(id){ await sbRest('DELETE','clienti',null,id); }
