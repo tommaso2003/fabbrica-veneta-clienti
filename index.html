@@ -811,8 +811,10 @@ async function sbRest(method,table,body=null,id=null){
     return r;
   }
   if(method==='DELETE'){
-    const r=await fetch(url,{method:'DELETE',headers});
-    if(!r.ok) console.error(`❌ ${table} delete:`,r.status);
+    const delUrl=`${SB_URL}/rest/v1/${table}?id=eq.${id}`;
+    const r=await fetch(delUrl,{method:'DELETE',headers});
+    if(!r.ok){const t=await r.text();console.error(`❌ ${table} delete ${r.status}:`,t);}
+    else console.log(`✅ ${table} eliminato:`,id);
     return r;
   }
   if(method==='GET'){
