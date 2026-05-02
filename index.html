@@ -779,8 +779,15 @@ body{font-family:'Jost',sans-serif;background:var(--paper);color:var(--ink);min-
 // ══ SUPABASE ══
 const SB_URL='https://bkwgjcmewoyjszsmtgwk.supabase.co';
 const SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJrd2dqY21ld295anN6c210Z3drIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MDE3MjcsImV4cCI6MjA5MzI3NzcyN30.A1qW-q_Eu_snk7RZIymp4o-pVky3_fi3T81WYRP0EsQ';
-const { createClient } = supabase;
-const sb = createClient(SB_URL, SB_KEY);
+const sb = supabase.createClient(SB_URL, SB_KEY, {
+  auth: {
+    persistSession: true,
+    storageKey: 'fv-auth',
+    storage: window.localStorage,
+    autoRefreshToken: true,
+    detectSessionInUrl: false
+  }
+});
 
 // ══ STORAGE (localStorage cache + Supabase sync) ══
 const K={cli:'at4_cli',ord:'at4_ord',foto:'at4_foto',tess:'at4_tess'};
